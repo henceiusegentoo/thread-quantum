@@ -86,7 +86,7 @@ Every type lives in its own matching `.tr` file under `Sources/` with `PascalCas
 | [`Sources/QuantumCircuit.tr`](Sources/QuantumCircuit.tr) | `struct QuantumCircuit` | Mutable gate sequence builder (`hadamard`, `cnot`, `applyQft`, `applyInverseQft`, `applyGroverDiffusion`, `applyMaj`, `applyUma`, `applyRippleCarryAdder`, etc.) and `execute()` / `executeOn()`. |
 | [`Sources/QuantumSimulator.tr`](Sources/QuantumSimulator.tr) | `struct QuantumSimulator` | Parallel Born-rule measurement, projective collapse, and built-in algorithms (Bell, GHZ, QFT, Deutsch-Jozsa, Grover, Cuccaro quantum adder). |
 | [`Sources/CircuitLoader.tr`](Sources/CircuitLoader.tr) | `struct CircuitLoader` | OpenQASM 2.0 (`.qasm`) parser reading circuit files via `IO.readFile` into `QuantumCircuit` instances. |
-| [`Sources/main.tr`](Sources/main.tr) | `fn main(args: Array<String>)` | Runs CLI `.qasm` file(s) if provided, or runs all 5 quantum algorithm benchmarks and verifies `Circuits/*.qasm` when invoked with no arguments. |
+| [`Sources/main.tr`](Sources/main.tr) | `fn main()` | Runs the quantum algorithm benchmarks and loads/verifies `Circuits/*.qasm` directly via `CircuitLoader().loadFromFile(...)`. |
 
 Project-local Thread language and style skills live in:
 - [`.agents/skills/thread-language/SKILL.md`](.agents/skills/thread-language/SKILL.md)
@@ -134,11 +134,9 @@ trc check
 trc build --release --report
 
 # 3. Run the built-in algorithm benchmarks & OpenQASM verification suite
+#    (.qasm files are loaded directly via CircuitLoader().loadFromFile(...))
 trc run --release
 
-# 4. Execute any custom OpenQASM 2.0 (.qasm) file with the compiled binary
-.build/ThreadQuantum_0.1.0_release Circuits/adder4_11_plus_13.qasm
-
-# 5. Run differential tests (compares parallel analysis build against serial oracle) & snapshot checks
+# 4. Run differential tests (compares parallel analysis build against serial oracle) & snapshot checks
 trc test
 ```
