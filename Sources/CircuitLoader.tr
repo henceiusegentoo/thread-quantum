@@ -1,0 +1,578 @@
+import IO
+import Math
+
+struct CircuitLoader {
+    var tag: int = 0
+}
+
+implementation CircuitLoader {
+    fn copyString(self, _ source: String) -> String {
+        var result = ""
+        result.append(source)
+        return result
+    }
+
+    fn sliceString(self, _ source: String, _ start: int, _ end: int) -> String {
+        let chars = source.chars()
+        var result = ""
+        var i = start
+        while i < end {
+            result.append(chars[i] as String)
+            i += 1
+        }
+        return result
+    }
+
+    fn uppercaseAscii(self, _ token: String) -> String {
+        let chars = token.chars()
+        let upperAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars()
+        var result = ""
+        for i in 0..<chars.count {
+            let code = chars[i] as uInt
+            if code >= 97 && code <= 122 {
+                let offset = (code - 97) as int
+                result.append(upperAlphabet[offset] as String)
+            } else {
+                result.append(chars[i] as String)
+            }
+        }
+        return result
+    }
+
+    fn extractLeadingCommentName(self, _ source: String, _ fallbackName: String) -> String {
+        let chars = source.chars()
+        let count = chars.count
+        var i = 0
+        while i < count {
+            let c = chars[i] as uInt
+            if c == 32 || c == 9 || c == 13 || c == 10 {
+                i += 1
+            } else {
+                break
+            }
+        }
+
+        if i < count && (chars[i] as uInt) == 35 {
+            i += 1
+        } else if i + 1 < count && (chars[i] as uInt) == 47 && (chars[i + 1] as uInt) == 47 {
+            i += 2
+        } else {
+            return self.copyString(fallbackName)
+        }
+
+        while i < count {
+            let c = chars[i] as uInt
+            if c == 32 || c == 9 {
+                i += 1
+            } else {
+                break
+            }
+        }
+
+        let start = i
+        while i < count {
+            let c = chars[i] as uInt
+            if c == 10 || c == 13 {
+                break
+            }
+            i += 1
+        }
+
+        var end = i
+        while end > start {
+            let c = chars[end - 1] as uInt
+            if c == 32 || c == 9 {
+                end -= 1
+            } else {
+                break
+            }
+        }
+
+        if end <= start {
+            return self.copyString(fallbackName)
+        }
+        return self.sliceString(source, start, end)
+    }
+
+    fn parseIntToken(self, _ token: String, _ lineNum: int) -> int {
+        do {
+            return try intFromString(token)
+        } catch {
+            fatalError("OpenQASM line \(lineNum): invalid integer '\(token)' (\(error))")
+        }
+        return 0
+    }
+
+    fn parseDoubleToken(self, _ token: String, _ lineNum: int) -> double {
+        do {
+            return try doubleFromString(token)
+        } catch {
+            fatalError("OpenQASM line \(lineNum): invalid double '\(token)' (\(error))")
+        }
+        return 0.0
+    }
+
+    fn parseSimpleAngleTerm(self, _ term: String, _ lineNum: int) -> double {
+        let upper = self.uppercaseAscii(term)
+        if upper == "PI" || upper == "+PI" {
+            return 3.141592653589793
+        }
+        if upper == "-PI" {
+            return -3.141592653589793
+        }
+        return self.parseDoubleToken(term, lineNum)
+    }
+
+    fn parseAngleFactor(self, _ factor: String, _ lineNum: int) -> double {
+        let chars = factor.chars()
+        var starIdx = -1
+        for i in 0..<chars.count {
+            if (chars[i] as uInt) == 42 {
+                if starIdx != -1 {
+                    fatalError("OpenQASM line \(lineNum): unsupported nested multiplication in '\(factor)'")
+                }
+                starIdx = i
+            }
+        }
+        if starIdx == -1 {
+            return self.parseSimpleAngleTerm(factor, lineNum)
+        }
+        let left = self.sliceString(factor, 0, starIdx)
+        let right = self.sliceString(factor, starIdx + 1, chars.count)
+        return self.parseSimpleAngleTerm(left, lineNum) * self.parseSimpleAngleTerm(right, lineNum)
+    }
+
+    fn parseAngleToken(self, _ expr: String, _ lineNum: int) -> double {
+        let chars = expr.chars()
+        var slashIdx = -1
+        for i in 0..<chars.count {
+            if (chars[i] as uInt) == 47 {
+                if slashIdx != -1 {
+                    fatalError("OpenQASM line \(lineNum): unsupported nested division in '\(expr)'")
+                }
+                slashIdx = i
+            }
+        }
+        if slashIdx == -1 {
+            return self.parseAngleFactor(expr, lineNum)
+        }
+        let numStr = self.sliceString(expr, 0, slashIdx)
+        let denStr = self.sliceString(expr, slashIdx + 1, chars.count)
+        let num = self.parseAngleFactor(numStr, lineNum)
+        let den = self.parseAngleFactor(denStr, lineNum)
+        if abs(den) < 0.000000000001 {
+            fatalError("OpenQASM line \(lineNum): division by zero in angle '\(expr)'")
+        }
+        return num / den
+    }
+
+    fn parseBracketInt(self, _ token: String, _ lineNum: int) -> (hasBracket: bool, index: int) {
+        let chars = token.chars()
+        var openIdx = -1
+        var closeIdx = -1
+        for i in 0..<chars.count {
+            let code = chars[i] as uInt
+            if code == 91 {
+                if openIdx != -1 {
+                    fatalError("OpenQASM line \(lineNum): unexpected '[' in '\(token)'")
+                }
+                openIdx = i
+            } else if code == 93 {
+                if closeIdx != -1 {
+                    fatalError("OpenQASM line \(lineNum): unexpected ']' in '\(token)'")
+                }
+                closeIdx = i
+            }
+        }
+
+        if openIdx == -1 && closeIdx == -1 {
+            return (hasBracket: false, index: 0)
+        }
+        if openIdx == -1 || closeIdx == -1 || closeIdx <= openIdx + 1 || closeIdx != chars.count - 1 {
+            fatalError("OpenQASM line \(lineNum): malformed register subscript '\(token)'")
+        }
+
+        let inner = self.sliceString(token, openIdx + 1, closeIdx)
+        let parsed = self.parseIntToken(inner, lineNum)
+        return (hasBracket: true, index: parsed)
+    }
+
+    fn expectTokenCount(self, _ op: String, _ actual: int, _ expected: int, _ lineNum: int) {
+        if actual != expected {
+            fatalError("OpenQASM line \(lineNum): '\(op)' expects \(expected - 1) argument(s), got \(actual - 1)")
+        }
+    }
+
+    fn requireIndexedQubit(self, _ token: String, _ numQubits: int, _ op: String, _ lineNum: int) -> int {
+        let (hasBracket, index) = self.parseBracketInt(token, lineNum)
+        if !hasBracket {
+            fatalError("OpenQASM line \(lineNum): '\(op)' requires indexed qubit operand (e.g., q[0]), got '\(token)'")
+        }
+        if index < 0 || index >= numQubits {
+            fatalError("OpenQASM line \(lineNum): qubit index \(index) out of range 0..<\(numQubits) for '\(op)'")
+        }
+        return index
+    }
+
+    fn applySingleQubitOp(self, _ op: String, _ q: int, _ circuit: exclusive QuantumCircuit) {
+        if op == "I" || op == "ID" {
+            circuit.identity(q)
+        } else if op == "H" {
+            circuit.hadamard(q)
+        } else if op == "X" {
+            circuit.pauliX(q)
+        } else if op == "Y" {
+            circuit.pauliY(q)
+        } else if op == "Z" {
+            circuit.pauliZ(q)
+        } else if op == "S" {
+            circuit.phaseS(q)
+        } else if op == "SDG" {
+            circuit.phaseShift(q, -1.5707963267948966)
+        } else if op == "T" {
+            circuit.phaseT(q)
+        } else if op == "TDG" {
+            circuit.phaseShift(q, -0.7853981633974483)
+        }
+    }
+
+    fn applyParameterizedSingleOp(self, _ op: String, _ q: int, _ theta: double, _ circuit: exclusive QuantumCircuit) {
+        if op == "P" || op == "U1" {
+            circuit.phaseShift(q, theta)
+        } else if op == "RX" {
+            circuit.rotateX(q, theta)
+        } else if op == "RY" {
+            circuit.rotateY(q, theta)
+        } else if op == "RZ" {
+            circuit.rotateZ(q, theta)
+        }
+    }
+
+    fn applyGateStatement(self, _ op: String, _ tokens: Array<String>, _ lineNum: int, _ circuit: exclusive QuantumCircuit) {
+        let count = tokens.count
+        let numQubits = circuit.numQubits
+
+        if op == "CREG" || op == "BARRIER" || op == "MEASURE" {
+            return
+        }
+
+        if op == "I" || op == "ID" || op == "H" || op == "X" || op == "Y" || op == "Z" || op == "S" || op == "SDG" || op == "T" || op == "TDG" {
+            self.expectTokenCount(op, count, 2, lineNum)
+            let (hasBracket, index) = self.parseBracketInt(tokens[1], lineNum)
+            if hasBracket {
+                if index < 0 || index >= numQubits {
+                    fatalError("OpenQASM line \(lineNum): qubit index \(index) out of range 0..<\(numQubits) for '\(op)'")
+                }
+                self.applySingleQubitOp(op, index, circuit)
+            } else {
+                for q in 0..<numQubits {
+                    self.applySingleQubitOp(op, q, circuit)
+                }
+            }
+            return
+        }
+
+        if op == "P" || op == "U1" || op == "RX" || op == "RY" || op == "RZ" {
+            self.expectTokenCount(op, count, 3, lineNum)
+            let theta = self.parseAngleToken(tokens[1], lineNum)
+            let (hasBracket, index) = self.parseBracketInt(tokens[2], lineNum)
+            if hasBracket {
+                if index < 0 || index >= numQubits {
+                    fatalError("OpenQASM line \(lineNum): qubit index \(index) out of range 0..<\(numQubits) for '\(op)'")
+                }
+                self.applyParameterizedSingleOp(op, index, theta, circuit)
+            } else {
+                for q in 0..<numQubits {
+                    self.applyParameterizedSingleOp(op, q, theta, circuit)
+                }
+            }
+            return
+        }
+
+        if op == "U2" {
+            self.expectTokenCount(op, count, 4, lineNum)
+            let phi = self.parseAngleToken(tokens[1], lineNum)
+            let lam = self.parseAngleToken(tokens[2], lineNum)
+            let (hasBracket, index) = self.parseBracketInt(tokens[3], lineNum)
+            if hasBracket {
+                if index < 0 || index >= numQubits {
+                    fatalError("OpenQASM line \(lineNum): qubit index \(index) out of range 0..<\(numQubits) for '\(op)'")
+                }
+                circuit.rotateZ(index, lam)
+                circuit.rotateY(index, 1.5707963267948966)
+                circuit.rotateZ(index, phi)
+            } else {
+                for q in 0..<numQubits {
+                    circuit.rotateZ(q, lam)
+                    circuit.rotateY(q, 1.5707963267948966)
+                    circuit.rotateZ(q, phi)
+                }
+            }
+            return
+        }
+
+        if op == "U3" || op == "U" {
+            self.expectTokenCount(op, count, 5, lineNum)
+            let theta = self.parseAngleToken(tokens[1], lineNum)
+            let phi = self.parseAngleToken(tokens[2], lineNum)
+            let lam = self.parseAngleToken(tokens[3], lineNum)
+            let (hasBracket, index) = self.parseBracketInt(tokens[4], lineNum)
+            if hasBracket {
+                if index < 0 || index >= numQubits {
+                    fatalError("OpenQASM line \(lineNum): qubit index \(index) out of range 0..<\(numQubits) for '\(op)'")
+                }
+                circuit.rotateZ(index, lam)
+                circuit.rotateY(index, theta)
+                circuit.rotateZ(index, phi)
+            } else {
+                for q in 0..<numQubits {
+                    circuit.rotateZ(q, lam)
+                    circuit.rotateY(q, theta)
+                    circuit.rotateZ(q, phi)
+                }
+            }
+            return
+        }
+
+        if op == "CX" || op == "CNOT" || op == "CCX" || op == "TOFFOLI" || op == "MCX" {
+            if count < 3 {
+                fatalError("OpenQASM line \(lineNum): '\(op)' requires at least 2 qubit operands")
+            }
+            let target = self.requireIndexedQubit(tokens[count - 1], numQubits, op, lineNum)
+            if count == 3 {
+                let ctrl = self.requireIndexedQubit(tokens[1], numQubits, op, lineNum)
+                circuit.cnot(ctrl, target)
+            } else if count == 4 {
+                let c1 = self.requireIndexedQubit(tokens[1], numQubits, op, lineNum)
+                let c2 = self.requireIndexedQubit(tokens[2], numQubits, op, lineNum)
+                circuit.toffoli(c1, c2, target)
+            } else {
+                var mask = 0
+                for idx in 1..<(count - 1) {
+                    let ctrl = self.requireIndexedQubit(tokens[idx], numQubits, op, lineNum)
+                    mask = mask | (1 << ctrl)
+                }
+                circuit.multiControlledX(mask, target)
+            }
+            return
+        }
+
+        if op == "CZ" || op == "CCZ" || op == "C3Z" || op == "C4Z" || op == "C5Z" || op == "MCZ" {
+            if count < 3 {
+                fatalError("OpenQASM line \(lineNum): '\(op)' requires at least 2 qubit operands")
+            }
+            let target = self.requireIndexedQubit(tokens[count - 1], numQubits, op, lineNum)
+            if count == 3 {
+                let ctrl = self.requireIndexedQubit(tokens[1], numQubits, op, lineNum)
+                circuit.controlledZ(ctrl, target)
+            } else {
+                var mask = 0
+                for idx in 1..<(count - 1) {
+                    let ctrl = self.requireIndexedQubit(tokens[idx], numQubits, op, lineNum)
+                    mask = mask | (1 << ctrl)
+                }
+                circuit.multiControlledZ(mask, target)
+            }
+            return
+        }
+
+        if op == "CP" || op == "CU1" {
+            self.expectTokenCount(op, count, 4, lineNum)
+            let theta = self.parseAngleToken(tokens[1], lineNum)
+            let ctrl = self.requireIndexedQubit(tokens[2], numQubits, op, lineNum)
+            let target = self.requireIndexedQubit(tokens[3], numQubits, op, lineNum)
+            circuit.controlledPhase(ctrl, target, theta)
+            return
+        }
+
+        if op == "SWAP" {
+            self.expectTokenCount(op, count, 3, lineNum)
+            let qA = self.requireIndexedQubit(tokens[1], numQubits, op, lineNum)
+            let qB = self.requireIndexedQubit(tokens[2], numQubits, op, lineNum)
+            circuit.swap(qA, qB)
+            return
+        }
+
+        if op == "CSWAP" || op == "FREDKIN" {
+            self.expectTokenCount(op, count, 4, lineNum)
+            let ctrl = self.requireIndexedQubit(tokens[1], numQubits, op, lineNum)
+            let qA = self.requireIndexedQubit(tokens[2], numQubits, op, lineNum)
+            let qB = self.requireIndexedQubit(tokens[3], numQubits, op, lineNum)
+            circuit.fredkin(ctrl, qA, qB)
+            return
+        }
+
+        if op == "QFT" {
+            circuit.applyQft()
+            return
+        }
+
+        if op == "IQFT" {
+            circuit.applyInverseQft()
+            return
+        }
+
+        if op == "DIFFUSION" {
+            circuit.applyGroverDiffusion()
+            return
+        }
+
+        if op == "ORACLE" {
+            if count < 2 {
+                fatalError("OpenQASM line \(lineNum): ORACLE expects marked basis state")
+            }
+            let marked = self.parseIntToken(tokens[1], lineNum)
+            let stateCount = 1 << numQubits
+            if marked < 0 || marked >= stateCount {
+                fatalError("OpenQASM line \(lineNum): ORACLE state \(marked) out of range 0..<\(stateCount)")
+            }
+            circuit.phaseOracle(marked)
+            return
+        }
+
+        fatalError("OpenQASM line \(lineNum): unknown instruction '\(tokens[0])'")
+    }
+
+    fn processStatement(self, _ tokens: Array<String>, _ lineNum: int, _ circuit: exclusive QuantumCircuit, _ hasQubits: exclusive bool, _ circuitName: String) {
+        let op = self.uppercaseAscii(tokens[0])
+
+        if op == "OPENQASM" || op == "INCLUDE" {
+            return
+        }
+
+        if op == "QREG" {
+            self.expectTokenCount(op, tokens.count, 2, lineNum)
+            if hasQubits {
+                fatalError("OpenQASM line \(lineNum): duplicate qreg declaration")
+            }
+            let (hasBracket, numQubits) = self.parseBracketInt(tokens[1], lineNum)
+            if !hasBracket {
+                fatalError("OpenQASM line \(lineNum): qreg expects size subscript, got '\(tokens[1])'")
+            }
+            if numQubits < 1 || numQubits > 20 {
+                fatalError("OpenQASM line \(lineNum): qreg size must be 1..20, got \(numQubits)")
+            }
+            circuit = QuantumCircuit(name: self.copyString(circuitName), numQubits: numQubits)
+            hasQubits = true
+            return
+        }
+
+        if !hasQubits {
+            fatalError("OpenQASM line \(lineNum): statement '\(tokens[0])' appeared before 'qreg' declaration")
+        }
+
+        self.applyGateStatement(op, tokens, lineNum, circuit)
+    }
+
+    fn parseSource(self, _ source: String, _ defaultName: String) -> QuantumCircuit {
+        let chars = source.chars()
+        let charCount = chars.count
+
+        let circuitName = self.extractLeadingCommentName(source, defaultName)
+        var circuit = QuantumCircuit(name: self.copyString(circuitName), numQubits: 1)
+        var hasQubits = false
+
+        var lineNum = 1
+        var inComment = false
+        var inParens = false
+        var currentToken = ""
+        var hasTokenChars = false
+        var tokens = Array<String>(repeating: "", count: 0)
+
+        for i in 0..<charCount {
+            let ch = chars[i]
+            let code = ch as uInt
+
+            if code == 10 {
+                if !inComment && !inParens && hasTokenChars {
+                    tokens.append(currentToken)
+                    currentToken = ""
+                    hasTokenChars = false
+                }
+                inComment = false
+                lineNum += 1
+            } else if inComment {
+                let ignored = 0
+            } else if code == 35 {
+                inComment = true
+                if hasTokenChars {
+                    tokens.append(currentToken)
+                    currentToken = ""
+                    hasTokenChars = false
+                }
+            } else if code == 47 && i + 1 < charCount && (chars[i + 1] as uInt) == 47 {
+                inComment = true
+                if hasTokenChars {
+                    tokens.append(currentToken)
+                    currentToken = ""
+                    hasTokenChars = false
+                }
+            } else if code == 40 {
+                if hasTokenChars {
+                    tokens.append(currentToken)
+                    currentToken = ""
+                    hasTokenChars = false
+                }
+                inParens = true
+            } else if code == 41 {
+                if hasTokenChars {
+                    tokens.append(currentToken)
+                    currentToken = ""
+                    hasTokenChars = false
+                }
+                inParens = false
+            } else if code == 44 {
+                if hasTokenChars {
+                    tokens.append(currentToken)
+                    currentToken = ""
+                    hasTokenChars = false
+                }
+            } else if code == 59 {
+                if hasTokenChars {
+                    tokens.append(currentToken)
+                    currentToken = ""
+                    hasTokenChars = false
+                }
+                if tokens.count > 0 {
+                    self.processStatement(tokens, lineNum, circuit, hasQubits, circuitName)
+                    tokens = Array<String>(repeating: "", count: 0)
+                }
+                inParens = false
+            } else if code == 13 || code == 32 || code == 9 {
+                if !inParens && hasTokenChars {
+                    tokens.append(currentToken)
+                    currentToken = ""
+                    hasTokenChars = false
+                }
+            } else {
+                currentToken.append(ch as String)
+                hasTokenChars = true
+            }
+        }
+
+        if hasTokenChars {
+            tokens.append(currentToken)
+            currentToken = ""
+            hasTokenChars = false
+        }
+        if tokens.count > 0 {
+            fatalError("OpenQASM line \(lineNum): missing ';' at end of statement '\(tokens[0])'")
+        }
+
+        if !hasQubits {
+            fatalError("OpenQASM: missing required 'qreg q[n];' declaration in '\(defaultName)'")
+        }
+
+        return circuit
+    }
+
+    fn loadFromFile(self, _ filePath: String) -> QuantumCircuit {
+        do {
+            let content = try readFile(filePath)
+            return self.parseSource(content, filePath)
+        } catch {
+            fatalError("OpenQASM failed to read '\(filePath)': \(error)")
+        }
+        return QuantumCircuit(name: "unreachable", numQubits: 1)
+    }
+}

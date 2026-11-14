@@ -1,2 +1,158 @@
+import Math
+
 fn main() {
+    let simulator = QuantumSimulator(seed: 42, defaultShots: 2048)
+    let loader = CircuitLoader()
+
+    print("============================================================")
+    print("  ThreadQuantum: Parallel State-Vector Quantum Simulator")
+    print("============================================================")
+    print("")
+
+    // 1. Bell State |Phi+> = (|00> + |11>) / sqrt(2)
+    let bellCircuit = simulator.buildBellCircuit()
+    let bellState = bellCircuit.execute()
+    let bellResult = simulator.measureState(bellState, simulator.defaultShots)
+    print("[1] \(bellCircuit.describe())")
+    print(bellState.describe())
+    print(bellResult.describe())
+
+    let bellNorm = bellState.totalProbability()
+    assert(abs(bellNorm - 1.0) < 0.000001, "Bell state must be normalized")
+    assert(abs(bellState.probabilityOf(0) - 0.5) < 0.000001, "Bell |00> prob must be 0.5")
+    assert(abs(bellState.probabilityOf(3) - 0.5) < 0.000001, "Bell |11> prob must be 0.5")
+    assert(abs(bellState.expectationZ(0)) < 0.000001, "Bell <Z0> must be 0.0")
+    assert(abs(bellState.fidelity(bellState) - 1.0) < 0.000001, "Bell self-fidelity must be 1.0")
+
+    // 2. 5-Qubit GHZ Cat State (32 simultaneous basis states)
+    let ghzCircuit = simulator.buildGhzCircuit(5)
+    let ghzState = ghzCircuit.execute()
+    let ghzResult = simulator.measureState(ghzState, simulator.defaultShots)
+    print("[2] \(ghzCircuit.describe())")
+    print(ghzState.describe())
+    print(ghzResult.describe())
+
+    assert(abs(ghzState.probabilityOf(0) - 0.5) < 0.000001, "GHZ |00000> prob must be 0.5")
+    assert(abs(ghzState.probabilityOf(31) - 0.5) < 0.000001, "GHZ |11111> prob must be 0.5")
+    assert(abs(ghzState.qubitProbabilityOne(4) - 0.5) < 0.000001, "GHZ marginal P(q4=1) must be 0.5")
+
+    // 3. 4-Qubit Quantum Fourier Transform & Inverse QFT Round-Trip (16 states)
+    let qftInput = 13
+    let qftPrep = simulator.prepareBasisStateCircuit(4, qftInput, "Target |1101>").execute()
+    let qftForward = simulator.buildQuantumFourierTransformCircuit(4, qftInput)
+    let qftMidState = qftForward.execute()
+    let qftRoundTrip = simulator.buildQftRoundTripCircuit(4, qftInput)
+    let qftFinalState = qftRoundTrip.execute()
+    print("[3] \(qftRoundTrip.describe())")
+    print("  After forward QFT (uniform superposition over all 16 states, P(|1101>)=\(qftMidState.probabilityOf(qftInput).formatted(decimals: 4))):")
+    print("  After QFT -> IQFT round-trip fidelity vs |\(qftInput)>: \(qftPrep.fidelity(qftFinalState).formatted(decimals: 6))")
+    print(qftFinalState.describe())
+
+    for s in 0..<16 {
+        assert(abs(qftMidState.probabilityOf(s) - 0.0625) < 0.000001, "QFT of basis state must have uniform 1/16 probs")
+    }
+    assert(abs(qftPrep.fidelity(qftFinalState) - 1.0) < 0.000001, "QFT + IQFT must restore original state")
+
+    // 4. Deutsch-Jozsa Algorithm (4 input qubits + 1 ancilla = 32 states)
+    let djConstCircuit = simulator.buildDeutschJozsaCircuit(4, false)
+    let djConstState = djConstCircuit.execute()
+    let djBalancedCircuit = simulator.buildDeutschJozsaCircuit(4, true)
+    let djBalancedState = djBalancedCircuit.execute()
+
+    let ancillaBit = 1 << 4
+    let djConstInputZeroProb = djConstState.probabilityOf(0) + djConstState.probabilityOf(ancillaBit)
+    let djBalancedInputZeroProb = djBalancedState.probabilityOf(0) + djBalancedState.probabilityOf(ancillaBit)
+    print("[4] Deutsch-Jozsa (4 input qubits = 16 parallel oracle queries in 1 step):")
+    print("  Constant oracle P(input=|0000>) = \(djConstInputZeroProb.formatted(decimals: 6))")
+    print("  Balanced oracle P(input=|0000>) = \(djBalancedInputZeroProb.formatted(decimals: 6))")
+    print("")
+
+    assert(abs(djConstInputZeroProb - 1.0) < 0.000001, "Deutsch-Jozsa constant must give input |0000> with prob 1")
+    assert(abs(djBalancedInputZeroProb) < 0.000001, "Deutsch-Jozsa balanced must give input |0000> with prob 0")
+
+    // 5. Grover's Quantum Search Algorithm (6 qubits = 64 simultaneous states)
+    let targetState = 43
+    let groverCircuit = simulator.buildGroverSearchCircuit(6, targetState, 6)
+    let groverState = groverCircuit.execute()
+    let groverResult = simulator.measureState(groverState, 4096)
+    let targetProb = groverState.probabilityOf(targetState)
+    let (collapsedIndex, collapsedState) = simulator.collapseProjective(groverState, 0)
+
+    print("[5] \(groverCircuit.describe())")
+    print("  Classical random guess: 1/64 = 1.56%, Grover amplified P(\(groverState.formatBasisKet(targetState))) = \((targetProb * 100.0).formatted(decimals: 2))%")
+    print("  Projective collapse example: \(groverState.formatBasisKet(collapsedIndex)) (self-norm=\(collapsedState.totalProbability().formatted(decimals: 2)))")
+    print(groverResult.formatHistogram(32))
+
+    assert(targetProb > 0.99, "Grover search on 64 states with 6 iterations should exceed 99% target prob")
+    assert(groverState.mostLikelyState() == targetState, "Grover most likely state must match targetState")
+    assert(groverResult.dominantStateIndex() == targetState, "Grover empirical shot mode must match targetState")
+
+    // 6. Cuccaro In-Place Quantum Ripple-Carry Adder (10 qubits = 1024 basis states)
+    let adderCircuit = simulator.buildAdderCircuit(4, 11, 13)
+    let adderState = adderCircuit.execute()
+    let adderBest = adderState.mostLikelyState()
+    let (decodedA, decodedSum) = simulator.decodeAdderState(4, adderBest)
+    print("[6] \(adderCircuit.describe())")
+    print("  Result: |A=\(decodedA), Sum=\(decodedSum)> (state \(adderState.formatBasisKet(adderBest)), P=\(adderState.probabilityOf(adderBest).formatted(decimals: 6)))")
+
+    assert(adderBest == 395, "4-bit adder 11 + 13 must produce state index 395")
+    assert(adderState.probabilityOf(395) > 0.999999, "4-bit adder 11 + 13 must have probability 1.0")
+    assert(decodedA == 11 && decodedSum == 24, "Decoded adder output must preserve A=11 and compute 11 + 13 = 24")
+
+    // Superposition Addition: (|3> + |11>)/sqrt(2) + |13> -> (|3, 16> + |11, 24>)/sqrt(2)
+    var supAdder = QuantumCircuit(name: "4-Bit Superposition Adder ((|3>+|11>)/sqrt(2) + 13)", numQubits: 10)
+    supAdder.pauliX(0)
+    supAdder.pauliX(1)
+    supAdder.hadamard(3)
+    supAdder.pauliX(4)
+    supAdder.pauliX(6)
+    supAdder.pauliX(7)
+    supAdder.applyRippleCarryAdder(4)
+    let supState = supAdder.execute()
+    let (supA0, supS0) = simulator.decodeAdderState(4, 259)
+    let (supA1, supS1) = simulator.decodeAdderState(4, 395)
+    print("  Superposition addition:")
+    print("    |A=\(supA0), Sum=\(supS0)> prob = \(supState.probabilityOf(259).formatted(decimals: 4))")
+    print("    |A=\(supA1), Sum=\(supS1)> prob = \(supState.probabilityOf(395).formatted(decimals: 4))")
+    print("")
+
+    assert(abs(supState.probabilityOf(259) - 0.5) < 0.000001, "Superposition 3 + 13 = 16 must have prob 0.5")
+    assert(abs(supState.probabilityOf(395) - 0.5) < 0.000001, "Superposition 11 + 13 = 24 must have prob 0.5")
+
+    // 7. Verify OpenQASM (.qasm) Circuit Files Against Programmatic Circuits
+    let bellFromFile = loader.loadFromFile("Circuits/bell.qasm")
+    let bellFileState = bellFromFile.execute()
+    let ghzFromFile = loader.loadFromFile("Circuits/ghz5.qasm")
+    let ghzFileState = ghzFromFile.execute()
+    let qftFromFile = loader.loadFromFile("Circuits/qft4_roundtrip.qasm")
+    let qftFileState = qftFromFile.execute()
+    let djFromFile = loader.loadFromFile("Circuits/deutsch_jozsa_balanced.qasm")
+    let djFileState = djFromFile.execute()
+    let groverFromFile = loader.loadFromFile("Circuits/grover6_target43.qasm")
+    let groverFileState = groverFromFile.execute()
+    let groverFileResult = simulator.measureState(groverFileState, 4096)
+    let adderFromFile = loader.loadFromFile("Circuits/adder4_11_plus_13.qasm")
+    let adderFileState = adderFromFile.execute()
+    let (fileAdderA, fileAdderSum) = simulator.decodeAdderState(4, adderFileState.mostLikelyState())
+
+    print("[7] Verified OpenQASM (.qasm) Circuit Files:")
+    print("  - \(bellFromFile.describe()) | fidelity vs programmatic = \(bellFileState.fidelity(bellState).formatted(decimals: 6))")
+    print("  - \(ghzFromFile.describe()) | fidelity vs programmatic = \(ghzFileState.fidelity(ghzState).formatted(decimals: 6))")
+    print("  - \(qftFromFile.describe()) | fidelity vs |1101> = \(qftFileState.fidelity(qftPrep).formatted(decimals: 6))")
+    print("  - \(djFromFile.describe()) | P(input=|0000>) = \((djFileState.probabilityOf(0) + djFileState.probabilityOf(ancillaBit)).formatted(decimals: 6))")
+    print("  - \(groverFromFile.describe()) | P(|101011>) = \((groverFileState.probabilityOf(targetState) * 100.0).formatted(decimals: 2))%, shots = \(groverFileResult.countForState(targetState))/4096")
+    print("  - \(adderFromFile.describe()) | A=\(fileAdderA), Sum=\(fileAdderSum), fidelity = \(adderFileState.fidelity(adderState).formatted(decimals: 6))")
+    print("")
+
+    assert(bellFileState.fidelity(bellState) > 0.999999, "bell.qasm must match Bell circuit")
+    assert(ghzFileState.fidelity(ghzState) > 0.999999, "ghz5.qasm must match 5-qubit GHZ circuit")
+    assert(qftFileState.fidelity(qftPrep) > 0.999999, "qft4_roundtrip.qasm must restore |1101>")
+    assert((djFileState.probabilityOf(0) + djFileState.probabilityOf(ancillaBit)) < 0.000001, "deutsch_jozsa_balanced.qasm must give 0 prob on |0000>")
+    assert(groverFileState.mostLikelyState() == targetState, "grover6_target43.qasm most likely state must be 43")
+    assert(groverFileState.probabilityOf(targetState) > 0.99, "grover6_target43.qasm must amplify target 43 above 99%")
+    assert(groverFileState.fidelity(groverState) > 0.999999, "grover6_target43.qasm must match programmatic Grover circuit")
+    assert(fileAdderA == 11 && fileAdderSum == 24, "adder4_11_plus_13.qasm must compute 11 + 13 = 24")
+    assert(adderFileState.fidelity(adderState) > 0.999999, "adder4_11_plus_13.qasm must match programmatic adder circuit")
+
+    print("ALL QUANTUM SIMULATOR VERIFICATIONS PASSED!")
 }

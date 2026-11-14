@@ -1,0 +1,91 @@
+struct GateFactory {
+    var tag: int = 0
+}
+
+implementation GateFactory {
+    fn identity(self, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.identity, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn hadamard(self, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.hadamard, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn pauliX(self, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.pauliX, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn pauliY(self, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.pauliY, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn pauliZ(self, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.pauliZ, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn phaseS(self, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.phaseS, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn phaseT(self, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.phaseT, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn phaseShift(self, _ targetQubit: int, _ theta: double) -> QuantumGate {
+        return QuantumGate(kind: GateKind.phaseShift(theta), targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn rotateX(self, _ targetQubit: int, _ theta: double) -> QuantumGate {
+        return QuantumGate(kind: GateKind.rotateX(theta), targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn rotateY(self, _ targetQubit: int, _ theta: double) -> QuantumGate {
+        return QuantumGate(kind: GateKind.rotateY(theta), targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn rotateZ(self, _ targetQubit: int, _ theta: double) -> QuantumGate {
+        return QuantumGate(kind: GateKind.rotateZ(theta), targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 0)
+    }
+
+    fn cnot(self, _ controlQubit: int, _ targetQubit: int) -> QuantumGate {
+        precondition(controlQubit != targetQubit, "cnot control and target must be distinct qubits")
+        return QuantumGate(kind: GateKind.pauliX, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 1 << controlQubit)
+    }
+
+    fn controlledZ(self, _ controlQubit: int, _ targetQubit: int) -> QuantumGate {
+        precondition(controlQubit != targetQubit, "controlledZ control and target must be distinct qubits")
+        return QuantumGate(kind: GateKind.pauliZ, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 1 << controlQubit)
+    }
+
+    fn controlledPhase(self, _ controlQubit: int, _ targetQubit: int, _ theta: double) -> QuantumGate {
+        precondition(controlQubit != targetQubit, "controlledPhase control and target must be distinct qubits")
+        return QuantumGate(kind: GateKind.phaseShift(theta), targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: 1 << controlQubit)
+    }
+
+    fn toffoli(self, _ controlQubitA: int, _ controlQubitB: int, _ targetQubit: int) -> QuantumGate {
+        precondition(controlQubitA != targetQubit && controlQubitB != targetQubit && controlQubitA != controlQubitB, "toffoli qubits must all be distinct")
+        let mask = (1 << controlQubitA) | (1 << controlQubitB)
+        return QuantumGate(kind: GateKind.pauliX, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: mask)
+    }
+
+    fn multiControlledX(self, _ controlMask: int, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.pauliX, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: controlMask)
+    }
+
+    fn multiControlledZ(self, _ controlMask: int, _ targetQubit: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.pauliZ, targetQubit: targetQubit, secondTargetQubit: targetQubit, controlMask: controlMask)
+    }
+
+    fn swap(self, _ qubitA: int, _ qubitB: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.swap, targetQubit: qubitA, secondTargetQubit: qubitB, controlMask: 0)
+    }
+
+    fn fredkin(self, _ controlQubit: int, _ qubitA: int, _ qubitB: int) -> QuantumGate {
+        precondition(controlQubit != qubitA && controlQubit != qubitB, "fredkin control must be distinct from target qubits")
+        return QuantumGate(kind: GateKind.swap, targetQubit: qubitA, secondTargetQubit: qubitB, controlMask: 1 << controlQubit)
+    }
+
+    fn phaseOracle(self, _ markedState: int) -> QuantumGate {
+        return QuantumGate(kind: GateKind.phaseOracle(markedState), targetQubit: 0, secondTargetQubit: 0, controlMask: 0)
+    }
+}

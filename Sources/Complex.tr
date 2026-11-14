@@ -1,0 +1,74 @@
+import Math
+
+struct Complex {
+    var real: double
+    var imag: double
+}
+
+implementation Complex {
+    fn conjugate(self) -> Complex {
+        return Complex(real: self.real, imag: -self.imag)
+    }
+
+    fn normSquared(self) -> double {
+        return self.real * self.real + self.imag * self.imag
+    }
+
+    fn magnitude(self) -> double {
+        return sqrt(self.normSquared())
+    }
+
+    fn scale(self, _ factor: double) -> Complex {
+        return Complex(real: self.real * factor, imag: self.imag * factor)
+    }
+
+    fn approxEquals(self, _ other: Complex, _ tolerance: double) -> bool {
+        let diffReal = abs(self.real - other.real)
+        let diffImag = abs(self.imag - other.imag)
+        return diffReal <= tolerance && diffImag <= tolerance
+    }
+}
+
+implementation Add for Complex {
+    fn add(self, other: Self) -> Self {
+        return Complex(real: self.real + other.real, imag: self.imag + other.imag)
+    }
+}
+
+implementation Sub for Complex {
+    fn sub(self, other: Self) -> Self {
+        return Complex(real: self.real - other.real, imag: self.imag - other.imag)
+    }
+}
+
+implementation Mul for Complex {
+    fn mul(self, other: Self) -> Self {
+        let re = self.real * other.real - self.imag * other.imag
+        let im = self.real * other.imag + self.imag * other.real
+        return Complex(real: re, imag: im)
+    }
+}
+
+implementation Neg for Complex {
+    fn neg(self) -> Self {
+        return Complex(real: -self.real, imag: -self.imag)
+    }
+}
+
+implementation Equatable for Complex {
+    fn equals(self, other: Self) -> bool {
+        return self.real == other.real && self.imag == other.imag
+    }
+}
+
+implementation Describable for Complex {
+    fn describe(self) -> String {
+        let realText = self.real.formatted(decimals: 4)
+        if self.imag < 0.0 {
+            let imagMag = (-self.imag).formatted(decimals: 4)
+            return "\(realText) - \(imagMag)i"
+        }
+        let imagText = self.imag.formatted(decimals: 4)
+        return "\(realText) + \(imagText)i"
+    }
+}

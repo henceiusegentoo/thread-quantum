@@ -1,0 +1,200 @@
+import Math
+
+struct QuantumSimulator {
+    var seed: int
+    var defaultShots: int
+}
+
+implementation QuantumSimulator {
+    fn buildCdf(self, _ probabilities: Array<double>) -> Array<double> {
+        let count = probabilities.count
+        var cdf = Array<double>(repeating: 0.0, count: count)
+        var running = 0.0
+        for stateIndex in 0..<count {
+            running += probabilities[stateIndex]
+            cdf[stateIndex] = running
+        }
+        if count > 0 {
+            // Sentinel > 1.0 so uniform in [0.0, 1.0) never exceeds the final bucket,
+            // allowing inner shot loops to iterate directly over 0..<cdf.count.
+            cdf[count - 1] = 2.0
+        }
+        return cdf
+    }
+
+    fn sampleShots(self, _ state: QuantumState, _ numShots: int) -> Array<int> {
+        precondition(numShots >= 1, "numShots must be positive")
+        let probs = state.probabilities()
+        let cdf = self.buildCdf(probs)
+        var shotOutcomes = Array<int>(repeating: 0, count: numShots)
+
+        for shotIndex in 0..<numShots {
+            let rngBits = mix(self.seed, shotIndex)
+            let mantissa = rngBits & 9007199254740991
+            let uniform = (mantissa as double) / 9007199254740992.0
+            var chosen = 0
+            for stateIndex in 0..<cdf.count {
+                if uniform >= cdf[stateIndex] {
+                    chosen += 1
+                }
+            }
+            shotOutcomes[shotIndex] = chosen
+        }
+
+        return shotOutcomes
+    }
+
+    fn aggregateHistogram(self, _ shotOutcomes: Array<int>, _ numStates: int) -> Array<int> {
+        var counts = Array<int>(repeating: 0, count: numStates)
+        for shotIndex in 0..<shotOutcomes.count {
+            let outcome = shotOutcomes[shotIndex]
+            counts[outcome] += 1
+        }
+        return counts
+    }
+
+    fn measureState(self, _ state: QuantumState, _ numShots: int) -> MeasurementResult {
+        let shotOutcomes = self.sampleShots(state, numShots)
+        let counts = self.aggregateHistogram(shotOutcomes, state.numStates)
+        let singleOutcome = shotOutcomes[0]
+        let singleProb = state.probabilityOf(singleOutcome)
+        let singleKet = state.formatBasisKet(singleOutcome)
+        return MeasurementResult(numQubits: state.numQubits, collapsedStateIndex: singleOutcome, collapsedKet: singleKet, collapsedProbability: singleProb, shotCounts: counts, totalShots: numShots)
+    }
+
+    fn collapseProjective(self, _ state: QuantumState, _ shotCounter: int) -> (stateIndex: int, collapsed: QuantumState) {
+        let probs = state.probabilities()
+        let cdf = self.buildCdf(probs)
+        let rngBits = mix(self.seed + 104729, shotCounter)
+        let uniform = ((rngBits & 9007199254740991) as double) / 9007199254740992.0
+
+        var chosen = 0
+        for stateIndex in 0..<cdf.count {
+            if uniform >= cdf[stateIndex] {
+                chosen += 1
+            }
+        }
+
+        var collapsed = QuantumState(numQubits: state.numQubits)
+        let zero = Complex(real: 0.0, imag: 0.0)
+        var newAmps = Array<Complex>(repeating: zero, count: state.numStates)
+        newAmps[chosen] = Complex(real: 1.0, imag: 0.0)
+        collapsed.amplitudes = newAmps
+        return (chosen, collapsed)
+    }
+
+    fn simulate(self, _ circuit: QuantumCircuit) -> MeasurementResult {
+        let finalState = circuit.execute()
+        return self.measureState(finalState, self.defaultShots)
+    }
+
+    fn buildBellCircuit(self) -> QuantumCircuit {
+        var circuit = QuantumCircuit(name: "Bell State |Phi+>", numQubits: 2)
+        circuit.hadamard(0)
+        circuit.cnot(0, 1)
+        return circuit
+    }
+
+    fn buildGhzCircuit(self, _ numQubits: int) -> QuantumCircuit {
+        precondition(numQubits >= 2, "GHZ state requires at least 2 qubits")
+        var circuit = QuantumCircuit(name: "\(numQubits)-Qubit GHZ State", numQubits: numQubits)
+        circuit.hadamard(0)
+        for q in 0..<(numQubits - 1) {
+            circuit.cnot(q, q + 1)
+        }
+        return circuit
+    }
+
+    fn prepareBasisStateCircuit(self, _ numQubits: int, _ basisState: int, _ name: String) -> QuantumCircuit {
+        var circuit = QuantumCircuit(name: name, numQubits: numQubits)
+        for q in 0..<numQubits {
+            if ((basisState >> q) & 1) == 1 {
+                circuit.pauliX(q)
+            }
+        }
+        return circuit
+    }
+
+    fn buildQuantumFourierTransformCircuit(self, _ numQubits: int, _ inputBasisState: int) -> QuantumCircuit {
+        var circuit = self.prepareBasisStateCircuit(numQubits, inputBasisState, "\(numQubits)-Qubit QFT on |\(inputBasisState)>")
+        circuit.applyQft()
+        return circuit
+    }
+
+    fn buildQftRoundTripCircuit(self, _ numQubits: int, _ inputBasisState: int) -> QuantumCircuit {
+        var circuit = self.prepareBasisStateCircuit(numQubits, inputBasisState, "\(numQubits)-Qubit QFT + IQFT Round-Trip on |\(inputBasisState)>")
+        circuit.applyQft()
+        circuit.applyInverseQft()
+        return circuit
+    }
+
+    fn buildDeutschJozsaCircuit(self, _ numInputQubits: int, _ isBalanced: bool) -> QuantumCircuit {
+        precondition(numInputQubits >= 1, "Deutsch-Jozsa requires at least 1 input qubit")
+        let totalQubits = numInputQubits + 1
+        let ancilla = numInputQubits
+        let label = if isBalanced { "Balanced" } else { "Constant" }
+        var circuit = QuantumCircuit(name: "Deutsch-Jozsa (\(label), \(numInputQubits) inputs)", numQubits: totalQubits)
+
+        // Initialize ancilla qubit in |-> = H(X|0>)
+        circuit.pauliX(ancilla)
+        for q in 0..<totalQubits {
+            circuit.hadamard(q)
+        }
+
+        // Oracle U_f evaluated simultaneously across all 2^n inputs
+        if isBalanced {
+            for q in 0..<numInputQubits {
+                circuit.cnot(q, ancilla)
+            }
+        } else {
+            circuit.pauliX(ancilla)
+        }
+
+        // Interference layer on input register
+        for q in 0..<numInputQubits {
+            circuit.hadamard(q)
+        }
+
+        return circuit
+    }
+
+    fn buildGroverSearchCircuit(self, _ numQubits: int, _ markedState: int, _ iterations: int) -> QuantumCircuit {
+        let totalStates = 1 << numQubits
+        precondition(markedState >= 0 && markedState < totalStates, "markedState out of range")
+        var circuit = QuantumCircuit(name: "Grover Search (\(numQubits) qubits, target=\(markedState), iters=\(iterations))", numQubits: numQubits)
+        circuit.applyAllHadamard()
+        for iterIndex in 0..<iterations {
+            circuit.phaseOracle(markedState)
+            circuit.applyGroverDiffusion()
+        }
+        return circuit
+    }
+
+    fn buildAdderCircuit(self, _ numBits: int, _ operandA: int, _ operandB: int) -> QuantumCircuit {
+        let totalQubits = (2 * numBits) + 2
+        let limit = 1 << numBits
+        precondition(numBits >= 1 && totalQubits <= 20, "Adder numBits must keep total qubits in 4...20")
+        precondition(operandA >= 0 && operandA < limit, "operandA out of range")
+        precondition(operandB >= 0 && operandB < limit, "operandB out of range")
+
+        var circuit = QuantumCircuit(name: "\(numBits)-Bit Quantum Adder (\(operandA) + \(operandB))", numQubits: totalQubits)
+        for bit in 0..<numBits {
+            if ((operandA >> bit) & 1) == 1 {
+                circuit.pauliX(bit)
+            }
+            if ((operandB >> bit) & 1) == 1 {
+                circuit.pauliX(numBits + bit)
+            }
+        }
+        circuit.applyRippleCarryAdder(numBits)
+        return circuit
+    }
+
+    fn decodeAdderState(self, _ numBits: int, _ stateIndex: int) -> (operandA: int, sum: int) {
+        let maskA = (1 << numBits) - 1
+        let maskSum = (1 << (numBits + 1)) - 1
+        let a = stateIndex & maskA
+        let s = (stateIndex >> numBits) & maskSum
+        return (operandA: a, sum: s)
+    }
+}

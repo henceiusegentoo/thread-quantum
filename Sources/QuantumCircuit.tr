@@ -1,0 +1,226 @@
+import Math
+
+struct QuantumCircuit {
+    var name: String
+    var numQubits: int
+    var gates: Array<QuantumGate>
+
+    init(name: String, numQubits: int) {
+        precondition(numQubits >= 1 && numQubits <= 20, "QuantumCircuit requires 1...20 qubits")
+        self.name = name
+        self.numQubits = numQubits
+        self.gates = []
+    }
+}
+
+implementation QuantumCircuit {
+    mutating fn addGate(self, _ gate: QuantumGate) {
+        let oldCount = self.gates.count
+        var nextGates = Array<QuantumGate>(repeating: gate, count: oldCount + 1)
+        for gateIndex in 0..<oldCount {
+            nextGates[gateIndex] = self.gates[gateIndex]
+        }
+        self.gates = nextGates
+    }
+
+    mutating fn identity(self, _ targetQubit: int) {
+        self.addGate(GateFactory().identity(targetQubit))
+    }
+
+    mutating fn hadamard(self, _ targetQubit: int) {
+        self.addGate(GateFactory().hadamard(targetQubit))
+    }
+
+    mutating fn pauliX(self, _ targetQubit: int) {
+        self.addGate(GateFactory().pauliX(targetQubit))
+    }
+
+    mutating fn pauliY(self, _ targetQubit: int) {
+        self.addGate(GateFactory().pauliY(targetQubit))
+    }
+
+    mutating fn pauliZ(self, _ targetQubit: int) {
+        self.addGate(GateFactory().pauliZ(targetQubit))
+    }
+
+    mutating fn phaseS(self, _ targetQubit: int) {
+        self.addGate(GateFactory().phaseS(targetQubit))
+    }
+
+    mutating fn phaseT(self, _ targetQubit: int) {
+        self.addGate(GateFactory().phaseT(targetQubit))
+    }
+
+    mutating fn phaseShift(self, _ targetQubit: int, _ theta: double) {
+        self.addGate(GateFactory().phaseShift(targetQubit, theta))
+    }
+
+    mutating fn rotateX(self, _ targetQubit: int, _ theta: double) {
+        self.addGate(GateFactory().rotateX(targetQubit, theta))
+    }
+
+    mutating fn rotateY(self, _ targetQubit: int, _ theta: double) {
+        self.addGate(GateFactory().rotateY(targetQubit, theta))
+    }
+
+    mutating fn rotateZ(self, _ targetQubit: int, _ theta: double) {
+        self.addGate(GateFactory().rotateZ(targetQubit, theta))
+    }
+
+    mutating fn cnot(self, _ controlQubit: int, _ targetQubit: int) {
+        self.addGate(GateFactory().cnot(controlQubit, targetQubit))
+    }
+
+    mutating fn controlledZ(self, _ controlQubit: int, _ targetQubit: int) {
+        self.addGate(GateFactory().controlledZ(controlQubit, targetQubit))
+    }
+
+    mutating fn controlledPhase(self, _ controlQubit: int, _ targetQubit: int, _ theta: double) {
+        self.addGate(GateFactory().controlledPhase(controlQubit, targetQubit, theta))
+    }
+
+    mutating fn toffoli(self, _ controlQubitA: int, _ controlQubitB: int, _ targetQubit: int) {
+        self.addGate(GateFactory().toffoli(controlQubitA, controlQubitB, targetQubit))
+    }
+
+    mutating fn multiControlledX(self, _ controlMask: int, _ targetQubit: int) {
+        self.addGate(GateFactory().multiControlledX(controlMask, targetQubit))
+    }
+
+    mutating fn multiControlledZ(self, _ controlMask: int, _ targetQubit: int) {
+        self.addGate(GateFactory().multiControlledZ(controlMask, targetQubit))
+    }
+
+    mutating fn swap(self, _ qubitA: int, _ qubitB: int) {
+        self.addGate(GateFactory().swap(qubitA, qubitB))
+    }
+
+    mutating fn fredkin(self, _ controlQubit: int, _ qubitA: int, _ qubitB: int) {
+        self.addGate(GateFactory().fredkin(controlQubit, qubitA, qubitB))
+    }
+
+    mutating fn phaseOracle(self, _ markedState: int) {
+        self.addGate(GateFactory().phaseOracle(markedState))
+    }
+
+    mutating fn applyAllHadamard(self) {
+        for q in 0..<self.numQubits {
+            self.hadamard(q)
+        }
+    }
+
+    mutating fn applyGroverDiffusion(self) {
+        self.applyAllHadamard()
+        for q in 0..<self.numQubits {
+            self.pauliX(q)
+        }
+
+        if self.numQubits == 1 {
+            self.pauliZ(0)
+        } else {
+            let targetQubit = self.numQubits - 1
+            let controlMask = (1 << targetQubit) - 1
+            self.multiControlledZ(controlMask, targetQubit)
+        }
+
+        for q in 0..<self.numQubits {
+            self.pauliX(q)
+        }
+        self.applyAllHadamard()
+    }
+
+    mutating fn applyQft(self) {
+        let n = self.numQubits
+        let pi = 3.141592653589793
+        var j = n - 1
+        while j >= 0 {
+            self.hadamard(j)
+            var k = j - 1
+            while k >= 0 {
+                let power = j - k
+                let angle = pi / pow(2.0, power as double)
+                self.controlledPhase(k, j, angle)
+                k -= 1
+            }
+            j -= 1
+        }
+        for q in 0..<(n / 2) {
+            self.swap(q, (n - 1) - q)
+        }
+    }
+
+    mutating fn applyInverseQft(self) {
+        let n = self.numQubits
+        let pi = 3.141592653589793
+        var q = (n / 2) - 1
+        while q >= 0 {
+            self.swap(q, (n - 1) - q)
+            q -= 1
+        }
+        for j in 0..<n {
+            for k in 0..<j {
+                let power = j - k
+                let angle = -pi / pow(2.0, power as double)
+                self.controlledPhase(k, j, angle)
+            }
+            self.hadamard(j)
+        }
+    }
+
+    mutating fn applyMaj(self, _ carryQubit: int, _ bQubit: int, _ aQubit: int) {
+        self.cnot(aQubit, bQubit)
+        self.cnot(aQubit, carryQubit)
+        self.toffoli(carryQubit, bQubit, aQubit)
+    }
+
+    mutating fn applyUma(self, _ carryQubit: int, _ bQubit: int, _ aQubit: int) {
+        self.toffoli(carryQubit, bQubit, aQubit)
+        self.cnot(aQubit, carryQubit)
+        self.cnot(carryQubit, bQubit)
+    }
+
+    mutating fn applyRippleCarryAdder(self, _ numBits: int) {
+        precondition(numBits >= 1, "applyRippleCarryAdder requires numBits >= 1")
+        precondition(self.numQubits >= (2 * numBits) + 2, "applyRippleCarryAdder requires at least 2*numBits + 2 qubits")
+        let carryOutQubit = 2 * numBits
+        let carryInQubit = (2 * numBits) + 1
+
+        self.applyMaj(carryInQubit, numBits, 0)
+        for bit in 1..<numBits {
+            self.applyMaj(bit - 1, numBits + bit, bit)
+        }
+
+        self.cnot(numBits - 1, carryOutQubit)
+
+        var revBit = numBits - 1
+        while revBit >= 1 {
+            self.applyUma(revBit - 1, numBits + revBit, revBit)
+            revBit -= 1
+        }
+        self.applyUma(carryInQubit, numBits, 0)
+    }
+
+    fn gateCount(self) -> int {
+        return self.gates.count
+    }
+
+    fn executeOn(self, _ initialState: QuantumState) -> QuantumState {
+        precondition(initialState.numQubits == self.numQubits, "initialState qubit count must match circuit")
+        var state = initialState.duplicate()
+        for gateIndex in 0..<self.gates.count {
+            state.applyGate(self.gates[gateIndex])
+        }
+        return state
+    }
+
+    fn execute(self) -> QuantumState {
+        let initialState = QuantumState(numQubits: self.numQubits)
+        return self.executeOn(initialState)
+    }
+}
+
+implementation Describable for QuantumCircuit {
+    fn describe(self) -> String {
+        return "QuantumCircuit(\"\(self.name)\", qubits=\(self.numQubits), gates=\(self.gates.count))"
+    }
+}

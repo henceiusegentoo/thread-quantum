@@ -1,0 +1,68 @@
+struct MeasurementResult {
+    var numQubits: int
+    var collapsedStateIndex: int
+    var collapsedKet: String
+    var collapsedProbability: double
+    var shotCounts: Array<int>
+    var totalShots: int
+}
+
+implementation MeasurementResult {
+    fn countForState(self, _ stateIndex: int) -> int {
+        precondition(stateIndex >= 0 && stateIndex < self.shotCounts.count, "stateIndex out of bounds")
+        return self.shotCounts[stateIndex]
+    }
+
+    fn empiricalProbability(self, _ stateIndex: int) -> double {
+        if self.totalShots <= 0 {
+            return 0.0
+        }
+        return (self.countForState(stateIndex) as double) / (self.totalShots as double)
+    }
+
+    fn dominantStateIndex(self) -> int {
+        var bestIndex = 0
+        var bestCount = -1
+        for stateIndex in 0..<self.shotCounts.count {
+            let count = self.shotCounts[stateIndex]
+            if count > bestCount {
+                bestCount = count
+                bestIndex = stateIndex
+            }
+        }
+        return bestIndex
+    }
+
+    fn formatBasisKet(self, _ stateIndex: int) -> String {
+        var bits = "|"
+        var offset = 0
+        while offset < self.numQubits {
+            let bitPos = (self.numQubits - 1) - offset
+            let bit = (stateIndex >> bitPos) & 1
+            bits.append(bit.describe())
+            offset += 1
+        }
+        bits.append(">")
+        return bits
+    }
+
+    fn formatHistogram(self, _ minCount: int) -> String {
+        var out = "MeasurementResult(shots=\(self.totalShots), singleShot=\(self.collapsedKet) [exactProb=\(self.collapsedProbability.formatted(decimals: 4))]):\n"
+        for stateIndex in 0..<self.shotCounts.count {
+            let count = self.shotCounts[stateIndex]
+            if count >= minCount {
+                let emp = self.empiricalProbability(stateIndex)
+                let pct = (emp * 100.0).formatted(decimals: 2)
+                let ket = self.formatBasisKet(stateIndex)
+                out.append("  \(ket) : \(count)/\(self.totalShots) (\(pct)%)\n")
+            }
+        }
+        return out
+    }
+}
+
+implementation Describable for MeasurementResult {
+    fn describe(self) -> String {
+        return self.formatHistogram(1)
+    }
+}

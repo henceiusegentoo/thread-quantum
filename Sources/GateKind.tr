@@ -1,0 +1,164 @@
+import Math
+
+enum GateKind {
+    case identity
+    case hadamard
+    case pauliX
+    case pauliY
+    case pauliZ
+    case phaseS
+    case phaseT
+    case phaseShift(double)
+    case rotateX(double)
+    case rotateY(double)
+    case rotateZ(double)
+    case swap
+    case phaseOracle(int)
+}
+
+implementation GateKind {
+    fn name(self) -> String {
+        match self {
+        case .identity:
+            return "I"
+        case .hadamard:
+            return "H"
+        case .pauliX:
+            return "X"
+        case .pauliY:
+            return "Y"
+        case .pauliZ:
+            return "Z"
+        case .phaseS:
+            return "S"
+        case .phaseT:
+            return "T"
+        case .phaseShift(let theta):
+            return "P(\(theta.formatted(decimals: 3)))"
+        case .rotateX(let theta):
+            return "RX(\(theta.formatted(decimals: 3)))"
+        case .rotateY(let theta):
+            return "RY(\(theta.formatted(decimals: 3)))"
+        case .rotateZ(let theta):
+            return "RZ(\(theta.formatted(decimals: 3)))"
+        case .swap:
+            return "SWAP"
+        case .phaseOracle(let marked):
+            return "Oracle(\(marked))"
+        }
+    }
+
+    fn isSingleQubitUnitary(self) -> bool {
+        match self {
+        case .swap:
+            return false
+        case .phaseOracle(_):
+            return false
+        default:
+            return true
+        }
+    }
+
+    fn matrixRow0Col0(self) -> Complex {
+        let invSqrt2 = 1.0 / sqrt(2.0)
+        match self {
+        case .identity:
+            return Complex(real: 1.0, imag: 0.0)
+        case .hadamard:
+            return Complex(real: invSqrt2, imag: 0.0)
+        case .pauliX:
+            return Complex(real: 0.0, imag: 0.0)
+        case .pauliY:
+            return Complex(real: 0.0, imag: 0.0)
+        case .pauliZ:
+            return Complex(real: 1.0, imag: 0.0)
+        case .phaseS:
+            return Complex(real: 1.0, imag: 0.0)
+        case .phaseT:
+            return Complex(real: 1.0, imag: 0.0)
+        case .phaseShift(_):
+            return Complex(real: 1.0, imag: 0.0)
+        case .rotateX(let theta):
+            return Complex(real: cos(theta * 0.5), imag: 0.0)
+        case .rotateY(let theta):
+            return Complex(real: cos(theta * 0.5), imag: 0.0)
+        case .rotateZ(let theta):
+            return Complex(real: cos(theta * 0.5), imag: -sin(theta * 0.5))
+        default:
+            return Complex(real: 1.0, imag: 0.0)
+        }
+    }
+
+    fn matrixRow0Col1(self) -> Complex {
+        let invSqrt2 = 1.0 / sqrt(2.0)
+        match self {
+        case .hadamard:
+            return Complex(real: invSqrt2, imag: 0.0)
+        case .pauliX:
+            return Complex(real: 1.0, imag: 0.0)
+        case .pauliY:
+            return Complex(real: 0.0, imag: -1.0)
+        case .rotateX(let theta):
+            return Complex(real: 0.0, imag: -sin(theta * 0.5))
+        case .rotateY(let theta):
+            return Complex(real: -sin(theta * 0.5), imag: 0.0)
+        default:
+            return Complex(real: 0.0, imag: 0.0)
+        }
+    }
+
+    fn matrixRow1Col0(self) -> Complex {
+        let invSqrt2 = 1.0 / sqrt(2.0)
+        match self {
+        case .hadamard:
+            return Complex(real: invSqrt2, imag: 0.0)
+        case .pauliX:
+            return Complex(real: 1.0, imag: 0.0)
+        case .pauliY:
+            return Complex(real: 0.0, imag: 1.0)
+        case .rotateX(let theta):
+            return Complex(real: 0.0, imag: -sin(theta * 0.5))
+        case .rotateY(let theta):
+            return Complex(real: sin(theta * 0.5), imag: 0.0)
+        default:
+            return Complex(real: 0.0, imag: 0.0)
+        }
+    }
+
+    fn matrixRow1Col1(self) -> Complex {
+        let invSqrt2 = 1.0 / sqrt(2.0)
+        let piQuarter = 0.7853981633974483
+        match self {
+        case .identity:
+            return Complex(real: 1.0, imag: 0.0)
+        case .hadamard:
+            return Complex(real: -invSqrt2, imag: 0.0)
+        case .pauliX:
+            return Complex(real: 0.0, imag: 0.0)
+        case .pauliY:
+            return Complex(real: 0.0, imag: 0.0)
+        case .pauliZ:
+            return Complex(real: -1.0, imag: 0.0)
+        case .phaseS:
+            return Complex(real: 0.0, imag: 1.0)
+        case .phaseT:
+            return Complex(real: cos(piQuarter), imag: sin(piQuarter))
+        case .phaseShift(let theta):
+            return Complex(real: cos(theta), imag: sin(theta))
+        case .rotateX(let theta):
+            return Complex(real: cos(theta * 0.5), imag: 0.0)
+        case .rotateY(let theta):
+            return Complex(real: cos(theta * 0.5), imag: 0.0)
+        case .rotateZ(let theta):
+            return Complex(real: cos(theta * 0.5), imag: sin(theta * 0.5))
+        default:
+            return Complex(real: 1.0, imag: 0.0)
+        }
+    }
+}
+
+implementation Describable for GateKind {
+    fn describe(self) -> String {
+        return self.name()
+    }
+}

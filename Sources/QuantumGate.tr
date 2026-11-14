@@ -1,0 +1,44 @@
+struct QuantumGate {
+    var kind: GateKind
+    var targetQubit: int
+    var secondTargetQubit: int
+    var controlMask: int
+}
+
+implementation QuantumGate {
+    fn isControlled(self) -> bool {
+        return self.controlMask != 0
+    }
+
+    fn withControl(self, _ controlQubit: int) -> QuantumGate {
+        let newMask = self.controlMask | (1 << controlQubit)
+        return QuantumGate(kind: self.kind, targetQubit: self.targetQubit, secondTargetQubit: self.secondTargetQubit, controlMask: newMask)
+    }
+
+    fn withControlMask(self, _ mask: int) -> QuantumGate {
+        return QuantumGate(kind: self.kind, targetQubit: self.targetQubit, secondTargetQubit: self.secondTargetQubit, controlMask: mask)
+    }
+
+    fn describeGate(self) -> String {
+        match self.kind {
+        case .swap:
+            if self.controlMask != 0 {
+                return "CSWAP(ctrlMask: \(self.controlMask), q\(self.targetQubit), q\(self.secondTargetQubit))"
+            }
+            return "SWAP(q\(self.targetQubit), q\(self.secondTargetQubit))"
+        case .phaseOracle(let marked):
+            return "Oracle(marked: |\(marked)>)"
+        default:
+            if self.controlMask != 0 {
+                return "C-\(self.kind.name())(ctrlMask: \(self.controlMask), target: q\(self.targetQubit))"
+            }
+            return "\(self.kind.name())(q\(self.targetQubit))"
+        }
+    }
+}
+
+implementation Describable for QuantumGate {
+    fn describe(self) -> String {
+        return self.describeGate()
+    }
+}
